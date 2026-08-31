@@ -1,0 +1,29 @@
+# Rust build artifacts
+/target/
+
+# Local/runtime data
+/data/
+
+# Old Git repository backup
+/.git_backup/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# IDE / editor
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Rust / tooling
+*.rs.bk
