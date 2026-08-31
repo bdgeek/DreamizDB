@@ -141,11 +141,7 @@ fn main() {
 
     println!(
         "experiment gate: {}",
-        if experiment_allowed {
-            "PASS"
-        } else {
-            "REJECT"
-        }
+        if experiment_allowed { "PASS" } else { "REJECT" }
     );
 
     if !experiment_allowed {
@@ -237,10 +233,7 @@ fn main() {
         rows, restart_reads, restart_misses
     );
 
-    println!(
-        "restart full-scan avoided: {}",
-        restart_reads < 100_000
-    );
+    println!("restart full-scan avoided: {}", restart_reads < 100_000);
 
     let accepted = result.accepted && result_allowed;
 
