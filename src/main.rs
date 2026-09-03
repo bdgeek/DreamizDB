@@ -7,13 +7,15 @@ mod storage;
 mod telemetry;
 
 use crate::ai::{
-    apply_feedback, predict_index, ExperimentHistory, ExperimentRecord, Feedback, ModelStateStore,
+    apply_feedback, predict_heat, predict_index, ExperimentHistory, ExperimentRecord, Feedback,
+    ModelStateStore,
 };
 use crate::benchmark::{
     benchmark_persistent_index, benchmark_persistent_scan, benchmark_restart_index, sample_table,
 };
 use crate::experiment::{evaluate, BenchmarkMeasurement};
 use crate::storage::persistence::PersistentTable;
+use crate::storage::tier_for_heat;
 use crate::telemetry::{QueryEvent, TelemetryStore};
 use chrono::Utc;
 
@@ -34,6 +36,8 @@ fn main() {
 
     let telemetry_store = TelemetryStore::new(&telemetry_path);
     let model_store = ModelStateStore::new(&model_path);
+
+    let mut historical_events = telemetry_store.load().expect("load telemetry");
 
     let mut experiment_history =
         ExperimentHistory::load(&history_path).expect("load experiment history");
@@ -96,10 +100,29 @@ fn main() {
     // Persist telemetry so future runs accumulate workload data.
     for event in &events {
         telemetry_store.append(event).expect("append telemetry");
+        historical_events.push(event.clone());
     }
 
-    let features = crate::features::extract(&events);
+    let workload_window = crate::features::window(&historical_events, Utc::now(), 60);
+    let features = crate::features::extract(&workload_window);
     let feature = features.values().next().expect("workload feature");
+
+    let newest_event = workload_window
+        .iter()
+        .map(|event| event.timestamp)
+        .max()
+        .expect("workload window is not empty");
+
+    let age_hours = (Utc::now() - newest_event).num_seconds().max(0) as f64 / 3600.0;
+
+    let recent_ratio = if historical_events.is_empty() {
+        1.0
+    } else {
+        (workload_window.len() as f64 / historical_events.len() as f64).clamp(0.0, 1.0)
+    };
+
+    let heat = predict_heat(age_hours, feature.executions as f64, recent_ratio);
+    let tier = tier_for_heat(heat);
 
     // Load learned model state.
     let mut model_state = model_store.load().expect("load model state");
@@ -112,6 +135,14 @@ fn main() {
     );
     println!("failed experiments: {}", model_state.failed_experiments);
     println!("confidence boost: {:.4}", model_state.confidence_boost);
+
+    println!();
+    println!("=== Workload Heat ===");
+    println!("age: {:.4} hours", age_hours);
+    println!("executions: {}", feature.executions);
+    println!("recent ratio: {:.4}", recent_ratio);
+    println!("heat: {:.4}", heat);
+    println!("storage tier: {:?}", tier);
 
     // AI proposes an optimization.
     let recommendation = predict_index(feature, "customers.country", &model_state);
@@ -202,6 +233,22 @@ fn main() {
         after.avg_page_reads(),
         after.cache_hits,
         after.cache_misses
+    );
+
+    println!(
+        "baseline metrics: operation={}, rows={}, bytes/query={:.1}, evictions={}",
+        before.operation,
+        before.rows,
+        before.avg_bytes_read(),
+        before.evictions
+    );
+
+    println!(
+        "indexed metrics: operation={}, rows={}, bytes/query={:.1}, evictions={}",
+        after.operation,
+        after.rows,
+        after.avg_bytes_read(),
+        after.evictions
     );
 
     println!(

@@ -90,9 +90,7 @@ impl PersistentIndex {
     pub fn column(&self) -> &str {
         &self.meta.column
     }
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
+
     pub fn entry_count(&self) -> usize {
         self.meta.entries.len()
     }

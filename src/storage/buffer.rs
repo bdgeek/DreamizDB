@@ -62,11 +62,9 @@ impl BufferPool {
     pub fn stats(&self) -> CacheStats {
         self.stats
     }
+
     pub fn reset_stats(&mut self) {
         self.stats = CacheStats::default();
-    }
-    pub fn len(&self) -> usize {
-        self.pages.len()
     }
 
     fn touch(&mut self, page_id: u64) {

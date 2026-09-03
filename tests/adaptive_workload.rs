@@ -27,14 +27,18 @@ fn adaptive_workload_recommends_hot_predicate() {
     }
 
     let state = ai::ModelState::default();
-    let recommendations = ai::recommend_indexes(&events, &state);
+    let features = dreamizdb::features::extract(&events);
+    let feature = features
+        .values()
+        .next()
+        .expect("workload feature should exist");
 
-    assert!(!recommendations.is_empty());
+    let recommendation = ai::predict_index(feature, "customers.country", &state);
 
-    let recommendation = &recommendations[0];
+    assert_eq!(recommendation.target, "customers.country");
 
     assert_eq!(recommendation.action, "CREATE_TEMP_INDEX");
     assert_eq!(recommendation.target, "customers.country");
     assert!(recommendation.confidence >= 0.75);
-    assert!(optimizer::validate_experiment(recommendation));
+    assert!(optimizer::validate_experiment(&recommendation));
 }
