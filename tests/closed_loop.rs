@@ -3,15 +3,17 @@ use dreamizdb::features::WorkloadFeature;
 
 #[test]
 fn closed_loop_learns_from_successful_experiment() {
-    let mut feature = WorkloadFeature::default();
+    let mut predicate_frequency = std::collections::HashMap::new();
+    predicate_frequency.insert("customers.country".into(), 100);
 
-    feature.executions = 100;
-    feature.avg_latency_ms = 900.0;
-    feature.avg_selectivity = 0.05;
-    feature.unindexed_executions = 100;
-    feature
-        .predicate_frequency
-        .insert("customers.country".into(), 100);
+    let feature = WorkloadFeature {
+        executions: 100,
+        avg_latency_ms: 900.0,
+        avg_selectivity: 0.05,
+        unindexed_executions: 100,
+        predicate_frequency,
+        ..Default::default()
+    };
 
     let mut state = ModelState::default();
 

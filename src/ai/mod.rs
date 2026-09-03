@@ -210,26 +210,6 @@ pub fn predict_heat(age_hours: f64, executions: f64, recent_ratio: f64) -> f64 {
     (0.45 * recency + 0.35 * frequency + 0.20 * recent_ratio).clamp(0.0, 1.0)
 }
 
-pub fn recommend_indexes(
-    events: &[crate::telemetry::QueryEvent],
-    state: &ModelState,
-) -> Vec<Recommendation> {
-    let features = crate::features::extract(events);
-    let mut recommendations = Vec::new();
-
-    for feature in features.values() {
-        for predicate in feature.predicate_frequency.keys() {
-            let recommendation = predict_index(feature, predicate, state);
-
-            if crate::optimizer::validate_experiment(&recommendation) {
-                recommendations.push(recommendation);
-            }
-        }
-    }
-
-    recommendations
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

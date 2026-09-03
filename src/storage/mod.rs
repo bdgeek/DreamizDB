@@ -43,43 +43,9 @@ impl Table {
     pub fn new() -> Self {
         Self::default()
     }
+
     pub fn insert(&mut self, record: Record) {
         self.records.push(record);
         self.country_index = None;
-    }
-    pub fn len(&self) -> usize {
-        self.records.len()
-    }
-    pub fn sequential_scan(&self, country: &str) -> Vec<&Record> {
-        self.records
-            .iter()
-            .filter(|r| r.country == country)
-            .collect()
-    }
-    pub fn build_country_index(&mut self) {
-        let mut index = BTreeMap::new();
-        for (pos, r) in self.records.iter().enumerate() {
-            index
-                .entry(r.country.clone())
-                .or_insert_with(Vec::new)
-                .push(pos);
-        }
-        self.country_index = Some(index);
-    }
-    pub fn indexed_lookup(&self, country: &str) -> Option<Vec<&Record>> {
-        let index = self.country_index.as_ref()?;
-        Some(
-            index
-                .get(country)?
-                .iter()
-                .map(|&p| &self.records[p])
-                .collect(),
-        )
-    }
-    pub fn has_index(&self) -> bool {
-        self.country_index.is_some()
-    }
-    pub fn all_records(&self) -> &[Record] {
-        &self.records
     }
 }
