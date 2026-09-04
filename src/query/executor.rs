@@ -20,12 +20,11 @@ pub fn execute_query(table: &mut PersistentTable, plan: &QueryPlan) -> Result<Qu
         QueryPlan::SequentialScan {
             columns, predicate, ..
         } => {
+            let records = table.scan_all()?;
+
             let records = match predicate {
-                Some(predicate) => {
-                    let country = country_predicate_value(predicate)?;
-                    table.sequential_scan(&country)?
-                }
-                None => table.scan_all()?,
+                Some(predicate) => filter_records(records, predicate)?,
+                None => records,
             };
 
             build_result(columns, records)
@@ -48,18 +47,67 @@ pub fn execute_query(table: &mut PersistentTable, plan: &QueryPlan) -> Result<Qu
     }
 }
 
-fn country_predicate_value(predicate: &PredicatePlan) -> Result<String> {
-    match predicate.operator {
-        ComparisonOperator::Equal => {
-            if !predicate.column.eq_ignore_ascii_case("country") {
-                return Err(anyhow!(
-                    "sequential predicate is only supported for country"
-                ));
-            }
+fn filter_records(records: Vec<Record>, predicate: &PredicatePlan) -> Result<Vec<Record>> {
+    records
+        .into_iter()
+        .map(|record| {
+            let matches = predicate_matches(&record, predicate)?;
 
-            Ok(predicate.value.clone())
+            if matches {
+                Ok(Some(record))
+            } else {
+                Ok(None)
+            }
+        })
+        .filter_map(Result::transpose)
+        .collect()
+}
+
+fn predicate_matches(record: &Record, predicate: &PredicatePlan) -> Result<bool> {
+    let record_value = match predicate.column.to_ascii_lowercase().as_str() {
+        "id" => record.id.to_string(),
+        "country" => record.country.clone(),
+        "value" => format_number(record.value),
+        _ => {
+            return Err(anyhow!(
+                "unsupported predicate column: {}",
+                predicate.column
+            ));
+        }
+    };
+
+    match predicate.operator {
+        ComparisonOperator::Equal => Ok(record_value == predicate.value),
+
+        ComparisonOperator::NotEqual => Ok(record_value != predicate.value),
+
+        ComparisonOperator::LessThan => {
+            compare_values(&record_value, &predicate.value, |ordering| ordering.is_lt())
+        }
+
+        ComparisonOperator::LessThanOrEqual => {
+            compare_values(&record_value, &predicate.value, |ordering| ordering.is_le())
+        }
+
+        ComparisonOperator::GreaterThan => {
+            compare_values(&record_value, &predicate.value, |ordering| ordering.is_gt())
+        }
+
+        ComparisonOperator::GreaterThanOrEqual => {
+            compare_values(&record_value, &predicate.value, |ordering| ordering.is_ge())
         }
     }
+}
+
+fn compare_values<F>(left: &str, right: &str, comparison: F) -> Result<bool>
+where
+    F: FnOnce(std::cmp::Ordering) -> bool,
+{
+    if let (Ok(left_number), Ok(right_number)) = (left.parse::<f64>(), right.parse::<f64>()) {
+        return Ok(comparison(left_number.total_cmp(&right_number)));
+    }
+
+    Ok(comparison(left.cmp(right)))
 }
 
 fn build_result(columns: &[String], records: Vec<Record>) -> Result<QueryResult> {
@@ -83,6 +131,12 @@ fn build_result(columns: &[String], records: Vec<Record>) -> Result<QueryResult>
 
 fn project_column(record: &Record, column: &str) -> Result<String> {
     match column.to_ascii_lowercase().as_str() {
+        "*" => Ok(format!(
+            "{},{},{}",
+            record.id,
+            record.country,
+            format_number(record.value)
+        )),
         "id" => Ok(record.id.to_string()),
         "country" => Ok(record.country.clone()),
         "value" => Ok(format_number(record.value)),

@@ -15,4 +15,9 @@ pub struct Predicate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComparisonOperator {
     Equal,
+    NotEqual,
+    LessThan,
+    LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
 }

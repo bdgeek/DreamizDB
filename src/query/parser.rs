@@ -58,17 +58,32 @@ pub fn parse_select(sql: &str) -> anyhow::Result<SelectQuery> {
 }
 
 fn parse_predicate(condition: &str) -> anyhow::Result<Predicate> {
-    let (column, value) = condition
-        .split_once('=')
-        .ok_or_else(|| anyhow::anyhow!("only equality predicates are supported"))?;
+    let operators = [
+        ("<=", ComparisonOperator::LessThanOrEqual),
+        (">=", ComparisonOperator::GreaterThanOrEqual),
+        ("!=", ComparisonOperator::NotEqual),
+        ("=", ComparisonOperator::Equal),
+        ("<", ComparisonOperator::LessThan),
+        (">", ComparisonOperator::GreaterThan),
+    ];
 
-    let column = column.trim();
+    let (operator_text, operator, position) = operators
+        .iter()
+        .filter_map(|(text, operator)| {
+            condition
+                .find(text)
+                .map(|position| (*text, operator.clone(), position))
+        })
+        .min_by_key(|(_, _, position)| *position)
+        .ok_or_else(|| anyhow::anyhow!("unsupported comparison operator"))?;
+
+    let column = condition[..position].trim();
 
     if column.is_empty() {
         anyhow::bail!("missing predicate column");
     }
 
-    let value = value.trim();
+    let value = condition[position + operator_text.len()..].trim();
 
     if value.is_empty() {
         anyhow::bail!("missing predicate value");
@@ -82,7 +97,7 @@ fn parse_predicate(condition: &str) -> anyhow::Result<Predicate> {
 
     Ok(Predicate {
         column: column.to_owned(),
-        operator: ComparisonOperator::Equal,
+        operator,
         value,
     })
 }
