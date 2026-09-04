@@ -25,16 +25,21 @@ impl PersistentTable {
 
         for record in &table.records {
             let encoded = serde_json::to_vec(record)?;
+
             fingerprint_input.extend_from_slice(&encoded);
+
             store.write_page(page_count, &encoded)?;
+
             index_entries
                 .entry(record.country.clone())
                 .or_default()
                 .push(page_count);
+
             page_count += 1;
         }
 
         let fp = fingerprint_bytes(&fingerprint_input);
+
         let index = PersistentIndex::create(index_path, fp, "country", index_entries)?;
 
         Ok(Self {
@@ -51,6 +56,7 @@ impl PersistentTable {
 
         let mut store = PageStore::open(&data_path)?;
         let page_count = store.page_count()?;
+
         let index = PersistentIndex::open(&index_path)?;
 
         if index.column() != "country" {
@@ -64,10 +70,10 @@ impl PersistentTable {
         }
 
         Ok(Self {
-            page_count,
             store,
             index,
             buffer: BufferPool::new(64),
+            page_count,
         })
     }
 
@@ -87,6 +93,7 @@ impl PersistentTable {
 
         for page_id in 0..self.page_count {
             let payload = self.buffer.get_or_read(&mut self.store, page_id)?;
+
             let record: Record = serde_json::from_slice(&payload)?;
 
             if record.country == country {
@@ -103,11 +110,30 @@ impl PersistentTable {
         if let Some(page_ids) = self.index.lookup(country) {
             for &page_id in page_ids {
                 let payload = self.buffer.get_or_read(&mut self.store, page_id)?;
+
                 result.push(serde_json::from_slice(&payload)?);
             }
         }
 
         Ok(result)
+    }
+
+    /// Reads every record through the buffer pool.
+    ///
+    /// This is the full-table scan path used by the query executor
+    /// when a SELECT statement has no predicate.
+    #[allow(dead_code)]
+    pub fn scan_all(&mut self) -> Result<Vec<Record>> {
+        let mut records = Vec::with_capacity(self.page_count as usize);
+
+        for page_id in 0..self.page_count {
+            let payload = self.buffer.get_or_read(&mut self.store, page_id)?;
+
+            let record: Record = serde_json::from_slice(&payload)?;
+            records.push(record);
+        }
+
+        Ok(records)
     }
 
     pub fn page_count(&self) -> u64 {
