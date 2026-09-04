@@ -1,5 +1,5 @@
-use super::planner::{PredicatePlan, QueryPlan};
-use super::types::ComparisonOperator;
+use super::planner::QueryPlan;
+use super::types::{ComparisonOperator, PredicateExpression};
 use crate::storage::persistence::PersistentTable;
 use crate::storage::Record;
 use anyhow::{anyhow, Result};
@@ -47,13 +47,11 @@ pub fn execute_query(table: &mut PersistentTable, plan: &QueryPlan) -> Result<Qu
     }
 }
 
-fn filter_records(records: Vec<Record>, predicate: &PredicatePlan) -> Result<Vec<Record>> {
+fn filter_records(records: Vec<Record>, predicate: &PredicateExpression) -> Result<Vec<Record>> {
     records
         .into_iter()
         .map(|record| {
-            let matches = predicate_matches(&record, predicate)?;
-
-            if matches {
+            if predicate_matches(&record, predicate)? {
                 Ok(Some(record))
             } else {
                 Ok(None)
@@ -63,7 +61,33 @@ fn filter_records(records: Vec<Record>, predicate: &PredicatePlan) -> Result<Vec
         .collect()
 }
 
-fn predicate_matches(record: &Record, predicate: &PredicatePlan) -> Result<bool> {
+fn predicate_matches(record: &Record, predicate: &PredicateExpression) -> Result<bool> {
+    match predicate {
+        PredicateExpression::Comparison(predicate) => comparison_matches(record, predicate),
+
+        PredicateExpression::And(left, right) => {
+            let left_matches = predicate_matches(record, left)?;
+
+            if !left_matches {
+                return Ok(false);
+            }
+
+            predicate_matches(record, right)
+        }
+
+        PredicateExpression::Or(left, right) => {
+            let left_matches = predicate_matches(record, left)?;
+
+            if left_matches {
+                return Ok(true);
+            }
+
+            predicate_matches(record, right)
+        }
+    }
+}
+
+fn comparison_matches(record: &Record, predicate: &super::types::PredicatePlan) -> Result<bool> {
     let record_value = match predicate.column.to_ascii_lowercase().as_str() {
         "id" => record.id.to_string(),
         "country" => record.country.clone(),
@@ -137,9 +161,13 @@ fn project_column(record: &Record, column: &str) -> Result<String> {
             record.country,
             format_number(record.value)
         )),
+
         "id" => Ok(record.id.to_string()),
+
         "country" => Ok(record.country.clone()),
+
         "value" => Ok(format_number(record.value)),
+
         _ => Err(anyhow!("unsupported selected column: {column}")),
     }
 }

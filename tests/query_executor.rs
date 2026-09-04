@@ -217,3 +217,78 @@ fn executes_greater_than_or_equal_predicate() {
 
     cleanup(&path);
 }
+
+#[test]
+fn executes_and_predicate() {
+    let (mut table, path) = test_table();
+
+    let query = parse_select("SELECT id FROM users WHERE country = 'BD' AND value > 100")
+        .expect("query should parse");
+
+    let plan = plan_query(&query, false).expect("query should plan");
+
+    let result = execute_query(&mut table, &plan).expect("query should execute");
+
+    assert_eq!(result.columns, vec!["id"]);
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0].values, vec!["3"]);
+
+    cleanup(&path);
+}
+
+#[test]
+fn executes_or_predicate() {
+    let (mut table, path) = test_table();
+
+    let query = parse_select("SELECT id FROM users WHERE country = 'BD' OR country = 'US'")
+        .expect("query should parse");
+
+    let plan = plan_query(&query, false).expect("query should plan");
+
+    let result = execute_query(&mut table, &plan).expect("query should execute");
+
+    assert_eq!(result.columns, vec!["id"]);
+    assert_eq!(result.rows.len(), 3);
+
+    cleanup(&path);
+}
+
+#[test]
+fn executes_numeric_range_with_and() {
+    let (mut table, path) = test_table();
+
+    let query = parse_select("SELECT id FROM users WHERE value >= 100 AND value <= 200")
+        .expect("query should parse");
+
+    let plan = plan_query(&query, false).expect("query should plan");
+
+    let result = execute_query(&mut table, &plan).expect("query should execute");
+
+    assert_eq!(result.columns, vec!["id"]);
+    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows[0].values, vec!["1"]);
+    assert_eq!(result.rows[1].values, vec!["2"]);
+
+    cleanup(&path);
+}
+
+#[test]
+fn executes_nested_and_or_predicate() {
+    let (mut table, path) = test_table();
+
+    let query = parse_select(
+        "SELECT id FROM users WHERE country = 'BD' AND value >= 300 OR country = 'US'",
+    )
+    .expect("query should parse");
+
+    let plan = plan_query(&query, false).expect("query should plan");
+
+    let result = execute_query(&mut table, &plan).expect("query should execute");
+
+    assert_eq!(result.columns, vec!["id"]);
+    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows[0].values, vec!["2"]);
+    assert_eq!(result.rows[1].values, vec!["3"]);
+
+    cleanup(&path);
+}

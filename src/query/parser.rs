@@ -1,4 +1,4 @@
-use super::types::{ComparisonOperator, Predicate, SelectQuery};
+use super::types::{ComparisonOperator, PredicateExpression, PredicatePlan, SelectQuery};
 
 pub fn parse_select(sql: &str) -> anyhow::Result<SelectQuery> {
     let sql = sql.trim().trim_end_matches(';').trim();
@@ -20,7 +20,6 @@ pub fn parse_select(sql: &str) -> anyhow::Result<SelectQuery> {
     }
 
     let after_from = &sql[from_pos + " FROM ".len()..];
-
     let after_from_upper = after_from.to_uppercase();
 
     let (table, predicate) = if let Some(where_pos) = after_from_upper.find(" WHERE ") {
@@ -32,7 +31,11 @@ pub fn parse_select(sql: &str) -> anyhow::Result<SelectQuery> {
 
         let condition = after_from[where_pos + " WHERE ".len()..].trim();
 
-        (table, Some(parse_predicate(condition)?))
+        if condition.is_empty() {
+            anyhow::bail!("missing predicate");
+        }
+
+        (table, Some(parse_predicate_expression(condition)?))
     } else {
         let table = after_from.trim();
 
@@ -57,11 +60,50 @@ pub fn parse_select(sql: &str) -> anyhow::Result<SelectQuery> {
     })
 }
 
-fn parse_predicate(condition: &str) -> anyhow::Result<Predicate> {
+fn parse_predicate_expression(condition: &str) -> anyhow::Result<PredicateExpression> {
+    let condition = condition.trim();
+
+    if let Some(position) = find_logical_operator(condition, " OR ") {
+        let left = condition[..position].trim();
+        let right = condition[position + " OR ".len()..].trim();
+
+        if left.is_empty() || right.is_empty() {
+            anyhow::bail!("invalid OR expression");
+        }
+
+        return Ok(PredicateExpression::Or(
+            Box::new(parse_predicate_expression(left)?),
+            Box::new(parse_predicate_expression(right)?),
+        ));
+    }
+
+    if let Some(position) = find_logical_operator(condition, " AND ") {
+        let left = condition[..position].trim();
+        let right = condition[position + " AND ".len()..].trim();
+
+        if left.is_empty() || right.is_empty() {
+            anyhow::bail!("invalid AND expression");
+        }
+
+        return Ok(PredicateExpression::And(
+            Box::new(parse_predicate_expression(left)?),
+            Box::new(parse_predicate_expression(right)?),
+        ));
+    }
+
+    Ok(PredicateExpression::Comparison(parse_predicate(condition)?))
+}
+
+fn find_logical_operator(condition: &str, operator: &str) -> Option<usize> {
+    condition.to_uppercase().find(operator)
+}
+
+fn parse_predicate(condition: &str) -> anyhow::Result<PredicatePlan> {
     let operators = [
         ("<=", ComparisonOperator::LessThanOrEqual),
         (">=", ComparisonOperator::GreaterThanOrEqual),
         ("!=", ComparisonOperator::NotEqual),
+        ("<>", ComparisonOperator::NotEqual),
         ("=", ComparisonOperator::Equal),
         ("<", ComparisonOperator::LessThan),
         (">", ComparisonOperator::GreaterThan),
@@ -72,7 +114,7 @@ fn parse_predicate(condition: &str) -> anyhow::Result<Predicate> {
         .filter_map(|(text, operator)| {
             condition
                 .find(text)
-                .map(|position| (*text, operator.clone(), position))
+                .map(|position| (*text, *operator, position))
         })
         .min_by_key(|(_, _, position)| *position)
         .ok_or_else(|| anyhow::anyhow!("unsupported comparison operator"))?;
@@ -95,7 +137,7 @@ fn parse_predicate(condition: &str) -> anyhow::Result<Predicate> {
         .unwrap_or(value)
         .to_owned();
 
-    Ok(Predicate {
+    Ok(PredicatePlan {
         column: column.to_owned(),
         operator,
         value,
