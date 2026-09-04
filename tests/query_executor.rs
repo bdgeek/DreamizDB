@@ -129,3 +129,91 @@ fn projection_returns_only_requested_columns() {
 
     cleanup(&path);
 }
+
+#[test]
+fn executes_not_equal_predicate() {
+    let (mut table, path) = test_table();
+
+    let query =
+        parse_select("SELECT id FROM users WHERE country != 'BD'").expect("query should parse");
+
+    let plan = plan_query(&query, false).expect("query should plan");
+
+    let result = execute_query(&mut table, &plan).expect("query should execute");
+
+    assert_eq!(result.columns, vec!["id"]);
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0].values, vec!["2"]);
+
+    cleanup(&path);
+}
+
+#[test]
+fn executes_less_than_predicate() {
+    let (mut table, path) = test_table();
+
+    let query = parse_select("SELECT id FROM users WHERE value < 200").expect("query should parse");
+
+    let plan = plan_query(&query, false).expect("query should plan");
+
+    let result = execute_query(&mut table, &plan).expect("query should execute");
+
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0].values, vec!["1"]);
+
+    cleanup(&path);
+}
+
+#[test]
+fn executes_less_than_or_equal_predicate() {
+    let (mut table, path) = test_table();
+
+    let query =
+        parse_select("SELECT id FROM users WHERE value <= 200").expect("query should parse");
+
+    let plan = plan_query(&query, false).expect("query should plan");
+
+    let result = execute_query(&mut table, &plan).expect("query should execute");
+
+    assert_eq!(result.rows.len(), 2);
+
+    cleanup(&path);
+}
+
+#[test]
+fn executes_greater_than_predicate() {
+    let (mut table, path) = test_table();
+
+    let query = parse_select("SELECT id FROM users WHERE value > 100").expect("query should parse");
+
+    let plan = plan_query(&query, false).expect("query should plan");
+
+    let result = execute_query(&mut table, &plan).expect("query should execute");
+
+    assert_eq!(result.columns, vec!["id"]);
+    assert_eq!(result.rows.len(), 2);
+    assert_eq!(result.rows[0].values, vec!["2"]);
+    assert_eq!(result.rows[1].values, vec!["3"]);
+
+    cleanup(&path);
+}
+
+#[test]
+fn executes_greater_than_or_equal_predicate() {
+    let (mut table, path) = test_table();
+
+    let query =
+        parse_select("SELECT id FROM users WHERE value >= 100").expect("query should parse");
+
+    let plan = plan_query(&query, false).expect("query should plan");
+
+    let result = execute_query(&mut table, &plan).expect("query should execute");
+
+    assert_eq!(result.columns, vec!["id"]);
+    assert_eq!(result.rows.len(), 3);
+    assert_eq!(result.rows[0].values, vec!["1"]);
+    assert_eq!(result.rows[1].values, vec!["2"]);
+    assert_eq!(result.rows[2].values, vec!["3"]);
+
+    cleanup(&path);
+}
