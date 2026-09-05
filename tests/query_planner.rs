@@ -14,6 +14,7 @@ fn chooses_index_for_country_equality_when_index_exists() {
             columns: vec!["*".into()],
             column: "country".into(),
             value: "BD".into(),
+            predicate: None,
         }
     );
 }
@@ -25,7 +26,13 @@ fn chooses_scan_without_country_index() {
 
     let plan = plan_query(&query, false).expect("query should plan");
 
-    assert!(matches!(plan, QueryPlan::SequentialScan { .. }));
+    assert!(matches!(
+        plan,
+        QueryPlan::SequentialScan {
+            predicate: Some(_),
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -56,5 +63,68 @@ fn chooses_scan_for_non_country_predicate() {
             predicate: Some(_),
             ..
         }
+    ));
+}
+
+#[test]
+fn chooses_index_for_country_equality_with_additional_and_predicate() {
+    let query = parse_select("SELECT * FROM users WHERE country = 'BD' AND value > 100")
+        .expect("query should parse");
+
+    let plan = plan_query(&query, true).expect("query should plan");
+
+    match plan {
+        QueryPlan::IndexedLookup {
+            table,
+            columns,
+            column,
+            value,
+            predicate,
+        } => {
+            assert_eq!(table, "users");
+            assert_eq!(columns, vec!["*"]);
+            assert_eq!(column, "country");
+            assert_eq!(value, "BD");
+            assert!(predicate.is_some());
+        }
+        other => panic!("expected IndexedLookup, got {other:?}"),
+    }
+}
+
+#[test]
+fn chooses_scan_for_country_equality_with_or_predicate() {
+    let query = parse_select("SELECT * FROM users WHERE country = 'BD' OR value > 100")
+        .expect("query should parse");
+
+    let plan = plan_query(&query, true).expect("query should plan");
+
+    assert!(matches!(
+        plan,
+        QueryPlan::SequentialScan {
+            predicate: Some(_),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn chooses_index_when_country_predicate_is_on_right_side_of_and() {
+    let query = parse_select("SELECT * FROM users WHERE value > 100 AND country = 'BD'")
+        .expect("query should parse");
+
+    let plan = plan_query(&query, true).expect("query should plan");
+
+    assert!(matches!(
+        plan,
+        QueryPlan::IndexedLookup {
+            table,
+            columns,
+            column,
+            value,
+            predicate: Some(_),
+        } if table == "users"
+            && columns == vec!["*"]
+            && column == "country"
+            && value == "BD"
     ));
 }

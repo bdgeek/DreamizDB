@@ -34,6 +34,7 @@ pub fn execute_query(table: &mut PersistentTable, plan: &QueryPlan) -> Result<Qu
             columns,
             column,
             value,
+            predicate,
             ..
         } => {
             if !column.eq_ignore_ascii_case("country") {
@@ -41,6 +42,11 @@ pub fn execute_query(table: &mut PersistentTable, plan: &QueryPlan) -> Result<Qu
             }
 
             let records = table.indexed_lookup(value)?;
+
+            let records = match predicate {
+                Some(predicate) => filter_records(records, predicate)?,
+                None => records,
+            };
 
             build_result(columns, records)
         }

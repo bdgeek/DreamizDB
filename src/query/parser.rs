@@ -60,9 +60,32 @@ pub fn parse_select(sql: &str) -> anyhow::Result<SelectQuery> {
     })
 }
 
+/// Parses boolean predicate expressions with:
+///
+/// - comparisons
+/// - AND
+/// - OR
+/// - parentheses
+///
+/// AND has higher precedence than OR.
+///
+/// Examples:
+///
+/// country = 'BD'
+/// country = 'BD' AND value > 10
+/// country = 'BD' OR country = 'IN'
+/// country = 'BD' AND (value > 10 OR value < 5)
+/// (country = 'BD' OR country = 'IN') AND value >= 10
 fn parse_predicate_expression(condition: &str) -> anyhow::Result<PredicateExpression> {
     let condition = condition.trim();
 
+    if condition.is_empty() {
+        anyhow::bail!("missing predicate");
+    }
+
+    let condition = strip_outer_parentheses(condition)?;
+
+    // OR has the lowest precedence, so split it first.
     if let Some(position) = find_logical_operator(condition, " OR ") {
         let left = condition[..position].trim();
         let right = condition[position + " OR ".len()..].trim();
@@ -77,6 +100,7 @@ fn parse_predicate_expression(condition: &str) -> anyhow::Result<PredicateExpres
         ));
     }
 
+    // AND has higher precedence than OR.
     if let Some(position) = find_logical_operator(condition, " AND ") {
         let left = condition[..position].trim();
         let right = condition[position + " AND ".len()..].trim();
@@ -91,11 +115,138 @@ fn parse_predicate_expression(condition: &str) -> anyhow::Result<PredicateExpres
         ));
     }
 
+    // At this point the expression must be a simple comparison.
+    if contains_parentheses(condition) {
+        anyhow::bail!("unbalanced or invalid parentheses");
+    }
+
     Ok(PredicateExpression::Comparison(parse_predicate(condition)?))
 }
 
+/// Removes one or more complete outer parenthesis pairs.
+///
+/// Example:
+///
+/// ((country = 'BD'))
+///
+/// becomes:
+///
+/// country = 'BD'
+fn strip_outer_parentheses(condition: &str) -> anyhow::Result<&str> {
+    let mut expression = condition.trim();
+
+    loop {
+        if !is_wrapped_by_outer_parentheses(expression)? {
+            return Ok(expression);
+        }
+
+        expression = expression[1..expression.len() - 1].trim();
+    }
+}
+
+/// Returns true when the entire expression is enclosed by one matching
+/// outer pair of parentheses.
+fn is_wrapped_by_outer_parentheses(expression: &str) -> anyhow::Result<bool> {
+    let expression = expression.trim();
+
+    if expression.len() < 2 || !expression.starts_with('(') || !expression.ends_with(')') {
+        return Ok(false);
+    }
+
+    let bytes = expression.as_bytes();
+    let mut depth = 0usize;
+    let mut in_quotes = false;
+
+    for (index, &byte) in bytes.iter().enumerate() {
+        match byte {
+            b'\'' => {
+                in_quotes = !in_quotes;
+            }
+
+            b'(' if !in_quotes => {
+                depth += 1;
+            }
+
+            b')' if !in_quotes => {
+                if depth == 0 {
+                    anyhow::bail!("unbalanced parentheses");
+                }
+
+                depth -= 1;
+
+                // If the outer pair closes before the final character,
+                // then the whole expression is not wrapped by it.
+                if depth == 0 && index != bytes.len() - 1 {
+                    return Ok(false);
+                }
+            }
+
+            _ => {}
+        }
+    }
+
+    if in_quotes || depth != 0 {
+        anyhow::bail!("unbalanced parentheses");
+    }
+
+    Ok(true)
+}
+
+/// Finds AND/OR only when the operator is at the top expression level.
+///
+/// Logical operators inside parentheses or quoted strings are ignored.
 fn find_logical_operator(condition: &str, operator: &str) -> Option<usize> {
-    condition.to_uppercase().find(operator)
+    let bytes = condition.as_bytes();
+    let operator_bytes = operator.as_bytes();
+
+    if operator_bytes.is_empty() || bytes.len() < operator_bytes.len() {
+        return None;
+    }
+
+    let mut depth = 0usize;
+    let mut in_quotes = false;
+    let mut index = 0usize;
+
+    while index + operator_bytes.len() <= bytes.len() {
+        match bytes[index] {
+            b'\'' => {
+                in_quotes = !in_quotes;
+                index += 1;
+                continue;
+            }
+
+            b'(' if !in_quotes => {
+                depth += 1;
+                index += 1;
+                continue;
+            }
+
+            b')' if !in_quotes => {
+                if depth == 0 {
+                    return None;
+                }
+
+                depth -= 1;
+                index += 1;
+                continue;
+            }
+
+            _ => {}
+        }
+
+        if !in_quotes && depth == 0 && &bytes[index..index + operator_bytes.len()] == operator_bytes
+        {
+            return Some(index);
+        }
+
+        index += 1;
+    }
+
+    None
+}
+
+fn contains_parentheses(condition: &str) -> bool {
+    condition.contains('(') || condition.contains(')')
 }
 
 fn parse_predicate(condition: &str) -> anyhow::Result<PredicatePlan> {
@@ -123,6 +274,10 @@ fn parse_predicate(condition: &str) -> anyhow::Result<PredicatePlan> {
 
     if column.is_empty() {
         anyhow::bail!("missing predicate column");
+    }
+
+    if column.contains('(') || column.contains(')') {
+        anyhow::bail!("invalid predicate column");
     }
 
     let value = condition[position + operator_text.len()..].trim();
