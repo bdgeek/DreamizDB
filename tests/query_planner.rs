@@ -1,4 +1,6 @@
-use dreamizdb::query::{parse_select, plan_query, QueryPlan};
+use dreamizdb::query::{
+    parse_select, plan_query, ComparisonOperator, PredicateExpression, PredicatePlan, QueryPlan,
+};
 
 #[test]
 fn chooses_index_for_country_equality_when_index_exists() {
@@ -14,7 +16,11 @@ fn chooses_index_for_country_equality_when_index_exists() {
             columns: vec!["*".into()],
             column: "country".into(),
             value: "BD".into(),
-            predicate: None,
+            predicate: Some(PredicateExpression::Comparison(PredicatePlan {
+                column: "country".into(),
+                operator: ComparisonOperator::Equal,
+                value: "BD".into(),
+            })),
         }
     );
 }

@@ -1,6 +1,7 @@
 use super::buffer::{BufferPool, CacheStats};
 use super::index::{fingerprint_bytes, PersistentIndex};
 use super::page::{IoStats, PageStore};
+use crate::statistics::QueryStatistics;
 use crate::storage::{Record, Table};
 use anyhow::{anyhow, Result};
 use std::collections::BTreeMap;
@@ -93,7 +94,6 @@ impl PersistentTable {
 
         for page_id in 0..self.page_count {
             let payload = self.buffer.get_or_read(&mut self.store, page_id)?;
-
             let record: Record = serde_json::from_slice(&payload)?;
 
             if record.country == country {
@@ -110,7 +110,6 @@ impl PersistentTable {
         if let Some(page_ids) = self.index.lookup(country) {
             for &page_id in page_ids {
                 let payload = self.buffer.get_or_read(&mut self.store, page_id)?;
-
                 result.push(serde_json::from_slice(&payload)?);
             }
         }
@@ -122,13 +121,11 @@ impl PersistentTable {
     ///
     /// This is the full-table scan path used by the query executor
     /// when a SELECT statement has no predicate.
-    #[allow(dead_code)]
     pub fn scan_all(&mut self) -> Result<Vec<Record>> {
         let mut records = Vec::with_capacity(self.page_count as usize);
 
         for page_id in 0..self.page_count {
             let payload = self.buffer.get_or_read(&mut self.store, page_id)?;
-
             let record: Record = serde_json::from_slice(&payload)?;
             records.push(record);
         }
@@ -159,5 +156,24 @@ impl PersistentTable {
 
     pub fn index_entry_count(&self) -> usize {
         self.index.entry_count()
+    }
+
+    /// Number of index entries matching a country value.
+    pub fn country_index_match_count(&self, country: &str) -> usize {
+        self.index.key_entry_count(country)
+    }
+
+    /// Number of rows covered by the persistent country index.
+    pub fn indexed_row_count(&self) -> usize {
+        self.index.indexed_row_count()
+    }
+
+    /// Build planner statistics from the real persistent table/index.
+    pub fn query_statistics_for_country(&self, country: &str) -> QueryStatistics {
+        QueryStatistics::new(
+            self.page_count as usize,
+            self.indexed_row_count(),
+            self.country_index_match_count(country),
+        )
     }
 }
