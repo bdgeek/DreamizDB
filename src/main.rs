@@ -1,23 +1,16 @@
-mod ai;
-mod benchmark;
-mod experiment;
-mod features;
-mod optimizer;
-mod storage;
-mod telemetry;
+use chrono::Utc;
 
-use crate::ai::{
-    apply_feedback, predict_heat, predict_index, ExperimentHistory, ExperimentRecord, Feedback,
-    ModelStateStore,
-};
-use crate::benchmark::{
+use dreamizdb::ai::{apply_feedback, predict_heat, predict_index, Feedback, ModelStateStore};
+
+use dreamizdb::benchmark::{
     benchmark_persistent_index, benchmark_persistent_scan, benchmark_restart_index, sample_table,
 };
-use crate::experiment::{evaluate, BenchmarkMeasurement};
-use crate::storage::persistence::PersistentTable;
-use crate::storage::tier_for_heat;
-use crate::telemetry::{QueryEvent, TelemetryStore};
-use chrono::Utc;
+
+use dreamizdb::experiment::{evaluate, BenchmarkMeasurement, ExperimentHistory, ExperimentRecord};
+
+use dreamizdb::storage::persistence::PersistentTable;
+use dreamizdb::storage::tier_for_heat;
+use dreamizdb::telemetry::{QueryEvent, TelemetryStore};
 
 fn main() {
     println!("DreamizDB v0.9 — Persistent Adaptive Index Engine");
@@ -103,8 +96,8 @@ fn main() {
         historical_events.push(event.clone());
     }
 
-    let workload_window = crate::features::window(&historical_events, Utc::now(), 60);
-    let features = crate::features::extract(&workload_window);
+    let workload_window = dreamizdb::features::window(&historical_events, Utc::now(), 60);
+    let features = dreamizdb::features::extract(&workload_window);
     let feature = features.values().next().expect("workload feature");
 
     let newest_event = workload_window
@@ -168,7 +161,7 @@ fn main() {
     );
 
     // Safety gate: recommendation may enter an experiment.
-    let experiment_allowed = crate::optimizer::validate_experiment(&recommendation);
+    let experiment_allowed = dreamizdb::optimizer::validate_experiment(&recommendation);
 
     println!(
         "experiment gate: {}",
@@ -259,8 +252,10 @@ fn main() {
     println!("page-read reduction: {:.2}%", result.io_reduction_pct);
 
     // Final authorization is based on measured experiment results.
-    let result_allowed =
-        crate::optimizer::validate_result(result.latency_improvement_pct, result.io_reduction_pct);
+    let result_allowed = dreamizdb::optimizer::validate_result(
+        result.latency_improvement_pct,
+        result.io_reduction_pct,
+    );
 
     println!(
         "result gate: {}",

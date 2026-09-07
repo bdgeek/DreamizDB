@@ -94,6 +94,13 @@ impl PersistentIndex {
     pub fn entry_count(&self) -> usize {
         self.meta.entries.len()
     }
+    pub fn key_entry_count(&self, key: &str) -> usize {
+        self.meta.entries.get(key).map_or(0, Vec::len)
+    }
+
+    pub fn indexed_row_count(&self) -> usize {
+        self.meta.entries.values().map(Vec::len).sum()
+    }
 }
 
 pub fn fingerprint_bytes(bytes: &[u8]) -> String {
