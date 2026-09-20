@@ -1,8 +1,10 @@
 use anyhow::{anyhow, Result};
+use std::time::Instant;
 
 use crate::storage::persistence::PersistentTable;
 use crate::storage::Record;
 
+use super::metrics::{QueryExecutionMetrics, QueryMetrics};
 use super::planner::QueryPlan;
 use super::types::{ComparisonOperator, PredicateExpression, PredicatePlan};
 
@@ -17,11 +19,47 @@ pub struct QueryResult {
     pub rows: Vec<QueryRow>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueryExecution {
+    pub result: QueryResult,
+    pub metrics: QueryExecutionMetrics,
+}
+
+impl QueryExecution {
+    pub fn metrics_with_estimate(
+        &self,
+        estimated_rows: usize,
+        estimated_cost: f64,
+    ) -> QueryMetrics {
+        QueryMetrics::new(estimated_rows, estimated_cost, self.metrics)
+    }
+}
+
+/// Execute a query while preserving the original public API.
+///
+/// The detailed execution metrics are intentionally discarded here.
+/// Use `execute_query_with_metrics` when observability is required.
 pub fn execute_query(table: &mut PersistentTable, plan: &QueryPlan) -> Result<QueryResult> {
-    let (columns, predicate, records) = match plan {
+    Ok(execute_query_with_metrics(table, plan)?.result)
+}
+
+/// Execute a query and capture physical execution metrics.
+pub fn execute_query_with_metrics(
+    table: &mut PersistentTable,
+    plan: &QueryPlan,
+) -> Result<QueryExecution> {
+    let start = Instant::now();
+
+    let io_before = table.io_stats();
+    let cache_before = table.cache_stats();
+
+    let (columns, predicate, records, index_lookups) = match plan {
         QueryPlan::SequentialScan {
             columns, predicate, ..
-        } => (columns, predicate, table.scan_all()?),
+        } => {
+            let records = table.scan_all()?;
+            (columns, predicate, records, 0)
+        }
 
         QueryPlan::IndexedLookup {
             columns,
@@ -34,9 +72,13 @@ pub fn execute_query(table: &mut PersistentTable, plan: &QueryPlan) -> Result<Qu
                 return Err(anyhow!("unsupported index column: {column}"));
             }
 
-            (columns, predicate, table.indexed_lookup(value)?)
+            let records = table.indexed_lookup(value)?;
+
+            (columns, predicate, records, 1)
         }
     };
+
+    let rows_examined = records.len();
 
     let rows = records
         .into_iter()
@@ -49,9 +91,33 @@ pub fn execute_query(table: &mut PersistentTable, plan: &QueryPlan) -> Result<Qu
         .map(|record| project_record(&record, columns))
         .collect::<Result<Vec<_>>>()?;
 
-    Ok(QueryResult {
-        columns: columns.clone(),
-        rows,
+    let elapsed_ns = start.elapsed().as_nanos();
+
+    let io_after = table.io_stats();
+    let cache_after = table.cache_stats();
+
+    let metrics = QueryExecutionMetrics {
+        elapsed_ns,
+
+        rows_examined,
+        rows_returned: rows.len(),
+
+        page_reads: io_after.reads.saturating_sub(io_before.reads),
+        bytes_read: io_after.bytes_read.saturating_sub(io_before.bytes_read),
+
+        index_lookups,
+
+        cache_hits: cache_after.hits.saturating_sub(cache_before.hits),
+
+        cache_misses: cache_after.misses.saturating_sub(cache_before.misses),
+    };
+
+    Ok(QueryExecution {
+        result: QueryResult {
+            columns: columns.clone(),
+            rows,
+        },
+        metrics,
     })
 }
 
