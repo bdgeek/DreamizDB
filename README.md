@@ -40,9 +40,9 @@ The project is an experimental research platform. It is intended to validate dat
 
 ## Current Milestone
 
-### Cost-Based Query Planning & Execution
+### Phase 6 — Query Observability & Experimental Instrumentation
 
-The current implementation provides a working SQL query parsing, planning, cost-selection, and execution pipeline over persistent storage.
+The current implementation provides a working SQL query parsing, planning, cost-selection, execution, and observability pipeline over persistent storage.
 
 ### Implemented
 
@@ -51,13 +51,7 @@ The current implementation provides a working SQL query parsing, planning, cost-
 - `WHERE` predicates
 - `AND` / `OR` boolean expressions
 - Nested boolean expressions
-- Comparison operators:
-  - `=`
-  - `!=`
-  - `<`
-  - `<=`
-  - `>`
-  - `>=`
+- Comparison operators: `=`, `!=`, `<`, `<=`, `>`, `>=`
 - Sequential table scans
 - Persistent country-index lookups
 - Query plan representation
@@ -71,6 +65,22 @@ The current implementation provides a working SQL query parsing, planning, cost-
 - Physical page-read benchmarking
 - Experiment evaluation and reward calculation
 - AI-assisted adaptive recommendation pipeline
+- Structured query plan estimates
+- Sequential-scan and indexed-lookup candidate estimates
+- Structured `EXPLAIN` plan representation
+- Actual query execution metrics:
+  - Elapsed time
+  - Rows examined
+  - Rows returned
+  - Physical page reads
+  - Physical bytes read
+  - Index lookup count
+  - Buffer cache hits
+  - Buffer cache misses
+- Estimated-versus-actual cardinality error calculation
+- Query observability integration tests
+
+The `EXPLAIN` functionality is currently exposed through the Rust API. SQL-level `EXPLAIN SELECT ...` parsing is not yet implemented.
 
 ---
 
@@ -82,29 +92,10 @@ For an indexable predicate, the planner compares estimated costs:
 
 ```text
 Sequential Scan Cost ≈ total rows
-
 Indexed Lookup Cost ≈ index lookup + matching rows
 ```
 
-For example:
-
-```text
-1,000 rows
-10 matching rows
-        ↓
-Index lookup preferred
-```
-
-while:
-
-```text
-1,000 rows
-990 matching rows
-        ↓
-Sequential scan preferred
-```
-
-This allows the optimizer to make a deterministic decision based on persistent table statistics.
+For example, a query matching 10 rows out of 1,000 may favor an index lookup, while a query matching 990 rows may favor a sequential scan. The actual decision is made by the current deterministic cost model.
 
 The current cost model is intentionally simple and research-oriented. It provides a foundation for progressively more realistic cardinality and physical-cost models.
 
@@ -152,19 +143,83 @@ WHERE country = 'BD'
   AND (value >= 100 OR value = 400);
 ```
 
-The planner can choose between:
+The planner can choose between `SequentialScan` and `IndexedLookup` based on query structure, index availability, and persistent statistics.
+
+---
+
+## Query Observability and EXPLAIN
+
+Phase 6 introduces structured plan estimates and actual execution measurements.
+
+The planner exposes candidate strategies and their estimated cardinality and cost. The executor separately records actual execution metrics.
+
+Current metrics include:
 
 ```text
-SequentialScan
+Planning estimates
+    estimated rows
+    estimated cost
+    selected strategy
+
+Actual execution
+    elapsed time
+    rows examined
+    rows returned
+    physical page reads
+    physical bytes read
+    index lookups
+    cache hits
+    cache misses
 ```
 
-and:
+Estimated and actual values are kept separate so that later experiments can evaluate estimation accuracy.
+
+### Structured EXPLAIN
+
+The Rust API can build and format an explanation of the selected plan without executing the query.
+
+A representative formatted explanation is:
 
 ```text
-IndexedLookup
+QUERY PLAN
+--------------------------------
+Table: users
+Predicate: present
+
+Candidate Plans:
+  Sequential Scan
+    estimated rows: 1000
+    estimated cost: 1000.00
+  Indexed Lookup
+    estimated rows: 10
+    estimated cost: 11.00
+
+Selected:
+  Indexed Lookup
+  estimated cost: 11.00
+
+Reason:
+  lowest estimated cost
 ```
 
-based on query structure, index availability, and persistent statistics.
+This is a structured plan explanation, not yet a SQL-level `EXPLAIN` command.
+
+### Estimated-versus-Actual Cardinality
+
+The metrics layer calculates the percentage difference between estimated and actual returned rows.
+
+For example:
+
+```text
+Estimated rows: 10
+Actual rows:    87
+
+Cardinality error: +770%
+```
+
+A positive value indicates an underestimate; a negative value indicates an overestimate.
+
+This measurement will support future cardinality-estimation and cost-model experiments.
 
 ---
 
@@ -231,26 +286,30 @@ The project includes tests covering:
 - Cost-based planning
 - Persistent cost-based planning
 - Query execution
+- Query observability and execution metrics
+- Structured query plan estimates and EXPLAIN output
+- Estimated-versus-actual cardinality error
 - Persistent storage
-- Persistent index restart
+- Persistent index restart validation
 - Buffer pool behavior
 - Adaptive workload analysis
 - Closed-loop learning
 - Telemetry
 - Pipeline behavior
 
-Latest local validation:
+### Latest Local Validation
 
 ```text
-cargo check --lib        ✓
-cargo check --bin        ✓
-cargo test               ✓
+cargo fmt                    ✓
+cargo check --lib            ✓
+cargo check --bin dreamizdb  ✓
+cargo test                   ✓
 
-61 tests passed
+78 tests passed
 0 tests failed
 ```
 
-The test suite is intended to protect deterministic planner behavior while the storage, optimizer, and adaptive layers continue to evolve.
+This count reflects the latest local test run. It is not a claim about a fresh remote CI run.
 
 ---
 
@@ -266,6 +325,7 @@ DreamizDB/
 │   ├── optimizer.rs
 │   ├── query/
 │   │   ├── executor.rs
+│   │   ├── metrics.rs
 │   │   ├── mod.rs
 │   │   ├── parser.rs
 │   │   ├── planner.rs
@@ -288,6 +348,7 @@ DreamizDB/
 │   ├── query_cost_planner.rs
 │   ├── query_cost_planner_persistent.rs
 │   ├── query_executor.rs
+│   ├── query_observability.rs
 │   ├── query_parser.rs
 │   └── query_planner.rs
 │
@@ -420,7 +481,7 @@ Added:
 - Index version and column metadata
 - Protection against using an index for modified database contents
 
-### Current — Cost-Based Query Planning & Execution
+### Phase 5 — Cost-Based Query Planning & Execution
 
 Added:
 
@@ -438,6 +499,23 @@ Added:
 - Nested predicates
 - Persistent query-planning tests
 - End-to-end query execution tests
+
+### Phase 6 — Query Observability & Experimental Instrumentation
+
+Added:
+
+- Structured query plan estimates
+- Sequential-scan and indexed-lookup candidate estimates
+- Estimated cardinality and cost
+- Structured EXPLAIN representation
+- Query execution metrics
+- Rows examined and returned
+- Physical page reads and bytes read
+- Index lookup count
+- Buffer cache hit/miss measurements
+- Execution latency measurement
+- Estimated-versus-actual cardinality error
+- Query observability integration tests
 
 ---
 
@@ -463,16 +541,21 @@ Added:
 - [x] Boolean predicates
 - [x] Numeric comparisons
 - [x] End-to-end query tests
+- [x] Query execution metrics
+- [x] Structured plan estimates
+- [x] EXPLAIN plan representation
+- [x] Estimated-versus-actual cardinality error
 
 ### Next Research Targets
 
-- [ ] Multi-column indexes
-- [ ] More general indexable predicates
+- [ ] Controlled benchmark framework and workload generator
 - [ ] Improved cardinality/selectivity estimation
 - [ ] More realistic physical cost models
-- [ ] Query plan instrumentation
+- [ ] Benchmark comparison of sequential scan, indexed lookup, and planner-selected execution
 - [ ] Automatic index creation/removal experiments
 - [ ] Larger workload simulations
+- [ ] Multi-column indexes
+- [ ] More general indexable predicates
 - [ ] Concurrent query execution
 - [ ] Transaction support
 - [ ] WAL/recovery architecture
